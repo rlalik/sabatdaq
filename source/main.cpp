@@ -23,37 +23,36 @@
 #include <stdlib.h>
 #include <time.h>
 
+#include "config.h"
 #include "lib.hpp"
 
-constexpr auto DEFAULT_CONFIG_FILENAME = "SabatDAQ_Config.txt";
-
 // Stats Monitor
-#define SMON_CHTRG_RATE 0
-#define SMON_CHTRG_CNT 1
-#define SMON_PHA_RATE 2
-#define SMON_PHA_CNT 3
-#define SMON_HIT_RATE 4
-#define SMON_HIT_CNT 5
+enum SMON
+{
+    CHTRG_RATE,
+    CHTRG_CNT,
+    PHA_RATE,
+    PHA_CNT,
+    HIT_RATE,
+    HIT_CNT
+};
 
 // Plot type
-#define PLOT_E_SPEC_LG 0
-#define PLOT_E_SPEC_HG 1
-
-#ifdef linux
-#    define myscanf _scanf
-#else
-#    define myscanf scanf
-#endif
+enum PLOT_E_SPEC
+{
+    LG,
+    HG
+};
 
 // #define GNUPLOTEXE  "pgnuplot"
 #ifdef linux
-#    define GNUPLOTEXE "gnuplot"  // Or '/usr/bin/gnuplot'
-#    define NULL_PATH "/dev/null"
+constexpr auto GNUPLOTEXE = "gnuplot";  // Or '/usr/bin/gnuplot'
+constexpr auto NULL_PATH = "/dev/null";
 #    define popen popen
 #    define pclose pclose
 #else
-#    define GNUPLOTEXE "..\\..\\..\\gnuplot\\pgnuplot.exe"
-#    define NULL_PATH "nul"
+constexpr auto GNUPLOTEXE = "..\\..\\..\\gnuplot\\pgnuplot.exe";
+constexpr auto NULL_PATH = "nul";
 #    define popen _popen /* redefine POSIX 'deprecated' popen as _popen */
 #    define pclose _pclose /* redefine POSIX 'deprecated' pclose as _pclose */
 #endif
@@ -61,12 +60,8 @@ constexpr auto DEFAULT_CONFIG_FILENAME = "SabatDAQ_Config.txt";
 /**************************************************************/
 /*                  GLOBAL PARAMETERS                         */
 /**************************************************************/
-char description[1024];
-
 int stats_brd = 0, stats_ch = 0;
 int stats_mon = 0, stats_plot = 0;
-
-uint64_t CurrentTime, PrevKbTime, PrevRateTime, ElapsedTime, StartTime, StopTime;
 
 /*************************************************************/
 
@@ -145,21 +140,6 @@ int f_kbhit()
     return status;
 #endif
 }
-
-#ifdef linux
-// ----------------------------------------------------
-//
-// ----------------------------------------------------
-int _scanf(char* fmt, ...)
-{
-    int ret;
-    va_list args;
-    va_start(args, fmt);
-    ret = vscanf(fmt, args);
-    va_end(args);
-    return ret;
-}
-#endif
 
 // Convert a double in a string with unit (k, M, G)
 auto double2str(double f, int space) -> std::string
@@ -261,15 +241,16 @@ int CheckRunTimeCmd(sabatdaq::sabat_daq* daq, sabatdaq::DAQ_t* tcfg)
         // Clear Screen
         std::print("* GET PARAMETER FUNCTION\n\n");
         std::print("Enter board idx [0-{:d}]: ", tcfg->num_brd - 1);
-        scanf("%d", &brd);
+        auto ret = scanf("%d", &brd);
         if (brd < 0 or brd > (tcfg->num_brd - 1)) {
             std::print("Board index out of range\n");
             return FERSLIB_ERR_OPER_NOT_ALLOWED;
         }
         std::print("Enter parameter name: ");
-        scanf("%s", input_name);
+        ret = scanf("%s", input_name);
         r = FERS_GetParam(daq->get_handles()[brd], input_name, input_val);
         if (r != 0) {
+            char description[1024];
             FERS_GetLastError(description);
             std::print("ERROR: {:s}\n", description);
             return FERSLIB_ERR_GENERIC;
@@ -316,7 +297,7 @@ int CheckRunTimeCmd(sabatdaq::sabat_daq* daq, sabatdaq::DAQ_t* tcfg)
         int new_brd;
         std::print("Current Active Board = {:d}\n", stats_brd);
         std::print("New Active Board = ");
-        scanf("%d", &new_brd);
+        auto ret = scanf("%d", &new_brd);
 
         if ((new_brd >= 0) && (new_brd < tcfg->num_brd)) {
             stats_brd = new_brd;
@@ -329,7 +310,7 @@ int CheckRunTimeCmd(sabatdaq::sabat_daq* daq, sabatdaq::DAQ_t* tcfg)
         char chs[10];
         std::print("Current Active Channel = {:d}\n", stats_ch);
         std::print("New Active Channel ");
-        scanf("%s", chs);
+        auto ret = scanf("%s", chs);
         if (isdigit(chs[0])) {
             sscanf(chs, "%d", &new_ch);
         }
@@ -404,44 +385,30 @@ auto QuitProgram(sabatdaq::sabat_daq& daq, sabatdaq::DAQ_t& cfg) -> void
 int main(int argc, char* argv[])
 {
     FILE *fcfg, *plotter;
-    sabatdaq::DAQ_t this_cfg;
     sabatdaq::sabat_daq daq;
+    sabatdaq::DAQ_t this_cfg;
 
     FERS_BoardInfo_t BoardInfo[FERSLIB_MAX_NBRD];
-    char cfg_file[500];  // =
-                         // "C:\\Users\\dninci\\source\\repos\\FERSlibDemo\\x64\\Debug\\FERSlib_Config.txt";
-                         // //DEFAULT_CONFIG_FILENAME;
-    int ret = 0;
+
     float FiberDelayAdjust[FERSLIB_MAX_NCNC][FERSLIB_MAX_NTDL][FERSLIB_MAX_NNODES] = {0};
-    int cnc = 0;
-    int offline_conn = 0;
-    int UsingCnc = 0;
-    int MajorFWrev = 255;
-    int rdymsg = 1;
+
     int AcqMode = 0;
-    memset(&this_cfg, 0, sizeof(sabatdaq::DAQ_t));
-
     int tmp_brd = 0, tmp_ch = 0;
-
-    int i = 0, clrscr = 0, dtq, ch, b;  // jobrun = 0,
-    int nb = 0;
-    double tstamp_us, curr_tstamp_us = 0;
-    uint64_t kb_time = 0, curr_time = 0, print_time = 0;  // , wave_time;
-    float rtime;
-    void* Event;
+    int clrscr = 0, dtq, ch, b;
 
     std::print("**************************************************************\n");
-    std::print("FERSlib Demo v{:s}\n", DEMO_RELEASE_NUM);
+    std::print("SabatDAQ v{:s}\n", RELEASE_NUM);
     std::print("FERSlib v{:s}\n", FERS_GetLibReleaseNum());
-    std::print("\nWith this demo, you can perform the following:\n");
-    std::print(" - Open and configure FERS module\n");
-    std::print(" - Read an event\n");
-    std::print(" - Plot and collect statistics for Spectroscopy and Timing Common " "Start mode(Timing mode not yet implemented)");
-    std::print("\nFor more specific usage, refer to the Janus software version " "related to the FERS module you use\n");
+    // std::print("\nWith this demo, you can perform the following:\n");
+    // std::print(" - Open and configure FERS module\n");
+    // std::print(" - Read an event\n");
+    // std::print(" - Plot and collect statistics for Spectroscopy and Timing Common " "Start mode(Timing mode not yet implemented)");
+    // std::print("\nFor more specific usage, refer to the Janus software version " "related to the FERS module you use\n");
     std::print("**************************************************************\n");
 
     // std::print("\n\n{:s}\n{:d}\n", argv[0], argc);
 
+    std::string cfg_file = DEFAULT_CONFIG_FILENAME;
     if (argc == 1) {  // No options provided
         fcfg = fopen(DEFAULT_CONFIG_FILENAME, "r");
         if (fcfg == NULL) {
@@ -452,7 +419,6 @@ int main(int argc, char* argv[])
             print_menu();
             return FERSLIB_ERR_INVALID_PATH;
         }
-        strcpy(cfg_file, DEFAULT_CONFIG_FILENAME);
     } else if (argc == 2) {
         if (strcmp(argv[1], "-h") == 0 or strcmp(argv[1], "--help") == 0) {
             print_menu();
@@ -463,7 +429,7 @@ int main(int argc, char* argv[])
             std::print("No valid config file name {:s} provided. Exiting (ret={:d})\n", argv[1], (int)FERSLIB_ERR_INVALID_PATH);
             return FERSLIB_ERR_INVALID_PATH;
         }
-        strcpy(cfg_file, argv[1]);
+        cfg_file = argv[1];
     } else {
         return FERSLIB_ERR_GENERIC;
     }
@@ -475,18 +441,17 @@ int main(int argc, char* argv[])
     fclose(fcfg);
     // OPEN BOARDS
 
-    for (int b = 0; b < this_cfg.num_brd; b++) {
+    for (int b = 0, cnc = 0; b < this_cfg.num_brd; b++) {
         char *cc, cpath[100];
         if (((cc = strstr(this_cfg.brd_path[b], "tdl")) != NULL)) {  // TDlink used => Open connection to concentrator (this is not
                                                                      // mandatory, it is done for reading information about the
                                                                      // concentrator)
-            UsingCnc = 1;
             FERS_Get_CncPath(this_cfg.brd_path[b], cpath);
             if (!FERS_IsOpen(cpath)) {
                 FERS_CncInfo_t CncInfo;
                 std::print("\n--------------- Concentrator {:2d} ----------------\n", cnc);
                 std::print("Opening connection to {:s}\n", cpath);
-                ret = FERS_OpenDevice(cpath, &daq.get_cnc_handles()[cnc]);
+                int ret = FERS_OpenDevice(cpath, &daq.get_cnc_handles()[cnc]);
                 if (ret == 0) {
                     std::print("Connected to Concentrator {:s}\n", cpath);
                 } else {
@@ -530,7 +495,7 @@ int main(int argc, char* argv[])
         strcpy(BoardPath, this_cfg.brd_path[b]);
         //! [LastErrorOpen]
         //! [Connect]
-        ret = FERS_OpenDevice(BoardPath, &daq.get_handles()[b]);
+        int ret = FERS_OpenDevice(BoardPath, &daq.get_handles()[b]);
         //! [Connect]
         if (ret != 0) {
             char emsg[1024];
@@ -554,7 +519,7 @@ int main(int argc, char* argv[])
                                    BoardInfo[b].FPGA_FWrev & 0xFF,
                                    (BoardInfo[b].FPGA_FWrev >> 16) & 0xFFFF);
             }
-            MajorFWrev = min((int)(BoardInfo[b].FPGA_FWrev >> 8) & 0xFF, MajorFWrev);
+            int MajorFWrev = min((int)(BoardInfo[b].FPGA_FWrev >> 8) & 0xFF, MajorFWrev);
             std::print("FPGA FW revision = {:s}\n", fver);
             if (strstr(this_cfg.brd_path[b], "tdl") == NULL) {
                 std::print("uC FW revision = {:08X}\n", BoardInfo[b].uC_FWrev);
@@ -568,7 +533,7 @@ int main(int argc, char* argv[])
 
 LoadConfigFERS:
     //! [ParseFile]
-    ret = FERS_LoadConfigFile(cfg_file);
+    int ret = FERS_LoadConfigFile(const_cast<char*>(cfg_file.c_str()));
     //! [ParseFile]
     if (ret != 0) {
         std::print("Cannot load FERS configuration from file {:s}\n", cfg_file);
@@ -622,18 +587,18 @@ ConfigFERS:
     daq.ResetStatistics();
 
     this_cfg.acq_status = sabatdaq::ACQSTATUS::READY;
-    curr_time = sabatdaq::get_time();
-    print_time = curr_time;  // force 1st print with no delay
-    kb_time = curr_time;
-    stats_mon = SMON_PHA_RATE;
-    stats_plot = PLOT_E_SPEC_LG;
+    auto curr_time = sabatdaq::get_time();
+    auto print_time = curr_time;  // force 1st print with no delay
+    auto kb_time = curr_time;
+    stats_mon = SMON::PHA_RATE;
+    stats_plot = PLOT_E_SPEC::LG;
     stats_brd = 0;
     stats_ch = 0;
 
+    int rdymsg = 1;
     while (!this_cfg.Quit) {
         curr_time = sabatdaq::get_time();
         daq.get_stats().current_time = curr_time;
-        nb = 0;
 
         if ((curr_time - kb_time) > 200) {
             int code = CheckRunTimeCmd(&daq, &this_cfg);
@@ -676,6 +641,9 @@ ConfigFERS:
         }
 
         if (this_cfg.acq_status == sabatdaq::ACQSTATUS::RUNNING) {
+            double tstamp_us {0}, curr_tstamp_us {0};
+            void* Event {nullptr};
+            auto nb = 0;
             //! [GetEvent]
             ret = FERS_GetEvent(daq.get_handles(), &b, &dtq, &tstamp_us, &Event, &nb);
             //! [GetEvent]
@@ -730,7 +698,7 @@ ConfigFERS:
                 } else if (dtq == DTQ_COUNT) {  // 5202 Only
                     CountingEvent_t* Ev = (CountingEvent_t*)Event;
                     daq.get_stats().current_trgid[b] = Ev->trigger_id;
-                    for (i = 0; i < FERSLIB_MAX_NCH_5202; i++) {
+                    for (auto i = 0; i < FERSLIB_MAX_NCH_5202; i++) {
                         daq.get_stats().ChTrgCnt[b][i].cnt += Ev->counts[i];
                     }
                     daq.get_stats().T_OR_Cnt[b].cnt += Ev->t_or_counts;
@@ -777,11 +745,11 @@ ConfigFERS:
             }
 
             std::string ss[FERSLIB_MAX_NCH_5202], totror, ror, trr;
-            rtime = (float)(curr_time - daq.get_stats().start_time) / 1000;
+            auto rtime = (float)(curr_time - daq.get_stats().start_time) / 1000;
             if (this_cfg.acq_status == sabatdaq::ACQSTATUS::RUNNING) {
                 daq.UpdateStatistics(0);
                 double totrate = 0;
-                for (i = 0; i < this_cfg.num_brd; ++i) {
+                for (auto i = 0; i < this_cfg.num_brd; ++i) {
                     totrate += daq.get_stats().ByteCnt[i].rate;
                     totror = double2str(totrate, 1);
                 }
@@ -792,24 +760,24 @@ ConfigFERS:
                 trr = double2str(daq.get_stats().GlobalTrgCnt[0].rate, 1);
 
                 // Select Monitor Type
-                for (i = 0; i < FERSLIB_MAX_NCH_5202; ++i) {
-                    if (stats_mon == SMON_CHTRG_RATE) {
+                for (auto i = 0; i < FERSLIB_MAX_NCH_5202; ++i) {
+                    if (stats_mon == SMON::CHTRG_RATE) {
                         ss[i] = double2str(daq.get_stats().ChTrgCnt[0][i].rate, 0);
                     }
-                    if (stats_mon == SMON_PHA_RATE) {
+                    if (stats_mon == SMON::PHA_RATE) {
                         ss[i] = double2str(daq.get_stats().PHACnt[0][i].rate, 0);
                     }
-                    if (stats_mon == SMON_HIT_RATE) {
+                    if (stats_mon == SMON::HIT_RATE) {
                         ss[i] = double2str(daq.get_stats().ReadHitCnt[0][i].rate, 0);  // 5203 Only
                     }
 
-                    if (stats_mon == SMON_CHTRG_CNT) {
+                    if (stats_mon == SMON::CHTRG_CNT) {
                         ss[i] = double2str((double)daq.get_stats().ChTrgCnt[0][i].cnt, 0);
                     }
-                    if (stats_mon == SMON_PHA_CNT) {
+                    if (stats_mon == SMON::PHA_CNT) {
                         ss[i] = double2str((double)daq.get_stats().PHACnt[0][i].cnt, 0);
                     }
-                    if (stats_mon == SMON_HIT_CNT) {
+                    if (stats_mon == SMON::HIT_CNT) {
                         ss[i] = double2str((double)daq.get_stats().ReadHitCnt[0][i].cnt, 0);  // 5203 Only
                     }
                 }
@@ -831,7 +799,7 @@ ConfigFERS:
                 std::print("Temp (degC):     FPGA={:4.1f}              \n", daq.get_board_temp(0, sabatdaq::TEMP::FPGA));
                 std::print("\n");
                 // Print channels statistics
-                for (i = 0; i < FERSLIB_MAX_NCH_5202; i++) {
+                for (auto i = 0; i < FERSLIB_MAX_NCH_5202; i++) {
                     std::print("{:02d}: {:s}     ", i, ss[i]);
                     if ((i & 0x3) == 0x3) {
                         std::print("\n");
@@ -850,10 +818,10 @@ ConfigFERS:
                 FILE* hist_file;
                 hist_file = fopen("hist.txt", "w");
                 for (int j = 0; j < this_cfg.EHistoNbin; ++j) {
-                    if (stats_plot == PLOT_E_SPEC_LG) {
+                    if (stats_plot == PLOT_E_SPEC::LG) {
                         std::print(hist_file, "{:f}\t{:d}\n", float(j), daq.get_stats().H1_PHA_LG[stats_brd][stats_ch].H_data[j]);
                         ptitle = std::format("Spect LG");
-                    } else if (stats_plot == PLOT_E_SPEC_HG) {
+                    } else if (stats_plot == PLOT_E_SPEC::HG) {
                         std::print(hist_file, "{:f}\t{:d}\n", float(j), daq.get_stats().H1_PHA_HG[stats_brd][stats_ch].H_data[j]);
                         ptitle = std::format("Spect HG");
                     }

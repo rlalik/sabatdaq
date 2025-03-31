@@ -60,13 +60,15 @@ target_link_libraries(sabatdaq_lib PUBLIC JanusC::JanusC FERS::FERS)
 
 # ---- Declare executable ----
 
+configure_file(config.h.in ${CMAKE_BINARY_DIR}/include/config.h)
+
 add_executable(sabatdaq_exe source/main.cpp)
 add_executable(sabatdaq::exe ALIAS sabatdaq_exe)
 
 set_property(TARGET sabatdaq_exe PROPERTY OUTPUT_NAME sabatdaq)
 
 target_compile_features(sabatdaq_exe PRIVATE cxx_std_20)
-
+target_include_directories(sabatdaq_exe PRIVATE ${CMAKE_BINARY_DIR}/include)
 target_link_libraries(sabatdaq_exe PRIVATE sabatdaq_lib)
 
 # ---- Install rules ----

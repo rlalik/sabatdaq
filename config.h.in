@@ -1,0 +1,4 @@
+#pragma once
+
+constexpr auto RELEASE_NUM = "@PROJECT_VERSION@";
+constexpr auto DEFAULT_CONFIG_FILENAME = "SabatDAQ_Config.txt";
