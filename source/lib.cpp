@@ -1,9 +1,9 @@
 #include <cstring>
 #include <print>
 
-#include <sys/time.h>
-
 #include "lib.hpp"
+
+#include <sys/time.h>
 
 namespace sabatdaq
 {
